@@ -143,6 +143,15 @@ Before committing a change, run `make audit`; it must pass.
 - **`--limit`:** 200 by default, 0 for no limit. The cut comes after sorting, so a low limit is mostly half-price items.
 - **Result fields:** `cache` (`hit`, `fetchedAt`, and `ageMinutes` or `saved`), `storeId`, `totalDeals`, `matched`, `limited`, a per-list `lists` report (`truncated` if `--max-pages` was hit), and `incomplete` with `errors` if a page failed partway.
 
+## Everyday Rewards offers
+
+`woolies offers` lists the account's active Everyday Rewards points offers (the Boost offers), read-only. It never boosts anything, so boost in the Woolies app or on the site.
+
+- **How it reads them:** the offers come from `prod.api-wr.com/wx-rtl-offer-v2/offers`, a different host from the shop that takes the page's own auth headers. So the command loads the home page and reads the offers response the page already fetches, as `orders` does, instead of calling the API itself.
+- **Each offer has:** `id`, `boosted`, `section` (such as `WEEKLY_BOOSTERS`), `heading`, `description`, `startsAt`, `endsAt`, `reward` (`type` and `value`), `minimumSpend` in dollars, `channels`, `bannerIds`, and `primaryProductId` when the offer is for one product. The long terms text is left out.
+- **Partner promos:** by default only Woolworths shopping offers are shown. Offers with other banner ids (home loans, banking, BIG W, health brands, gift cards) are hidden and counted in `hidden`; `--all` includes them. The Woolworths banner ids (`1005`, `1030`) were worked out from which offers carry them, so check `woolworthsBanners` in `offers.go` if offers go missing.
+- **Result fields:** `total` and `boosted` count the shown offers, and `hidden` counts the partner promos left out.
+
 ## Configuration
 
 Settings live in a JSON file, `~/.woolies/config.json` (or the path in `WOOLIES_CONFIG`). Copy `config.example.json` to start. Every key is optional, a leading `~/` is expanded, and an unknown key is an error so typos show up. Each key can be overridden by an environment variable, and a command-line flag (`--postcode`, `--file`, `--dir`) wins over both. `woolies config` prints what is in effect and where each value came from.
@@ -165,7 +174,8 @@ Settings live in a JSON file, `~/.woolies/config.json` (or the path in `WOOLIES_
 - `cmd/woolies/specials.go`: `specials --all`: the paging, deal calculation and filters.
 - `cmd/woolies/recipe.go`: the file-only `recipe` commands (markdown parser, fuzzy lookup, `set`, `match`). Tests use copies of real recipes in `cmd/woolies/testdata/recipes/`.
 - `cmd/woolies/specials_cache.go`: the `specials --all` cache.
-- Tests (`*_test.go`) run offline. `fakesite_test.go` stands in for the Woolies API (it swaps `request` and `captureOrderBodies`), so commands are tested without a browser or an account; `make test/cover` shows coverage (about 86%; the rest is the code that drives the browser itself).
+- `cmd/woolies/offers.go`: the `offers` command: captures the page's offers response and trims it.
+- Tests (`*_test.go`) run offline. `fakesite_test.go` stands in for the Woolies API (it swaps `request`, `captureOrderBodies` and `captureOfferBodies`), so commands are tested without a browser or an account; `make test/cover` shows coverage (about 86%; the rest is the code that drives the browser itself).
 - `cmd/woolies/browser.go`: lock, browser launch, and the in-page `fetch` helper.
 - `cmd/woolies/trim.go`: trims the site's JSON down to the fields that matter.
 
