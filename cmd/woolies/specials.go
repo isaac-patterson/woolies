@@ -320,6 +320,13 @@ func cmdSpecialsAll(o opts) (obj, error) {
 	if maxPages < 1 {
 		return nil, usageErr("--max-pages must be at least 1")
 	}
+	var nameRe *regexp.Regexp
+	if m := o.str("match", ""); m != "" {
+		nameRe, err = regexp.Compile("(?i)" + m)
+		if err != nil {
+			return nil, usageErr("--match is not a valid regular expression: %v", err)
+		}
+	}
 	_, food := o["food"]
 	filter := specialsFilter{minDiscount: minDiscount, food: food}
 	for d := range strings.SplitSeq(o.str("department", ""), ",") {
@@ -382,6 +389,9 @@ func cmdSpecialsAll(o opts) (obj, error) {
 
 	matched := []obj{}
 	for _, d := range deals {
+		if nameRe != nil && !nameRe.MatchString(str(d["displayName"])) {
+			continue
+		}
 		if filter.match(d) {
 			matched = append(matched, d)
 		}

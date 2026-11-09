@@ -382,7 +382,7 @@ func resolveRecipe(dir, key string) (*recipe, string, error) {
 
 func cmdRecipe(pos []string, o opts) (obj, error) {
 	if len(pos) == 0 {
-		return nil, usageErr("usage: woolies recipe list|show|set|match (see `woolies help`)")
+		return nil, usageErr("usage: woolies recipe list|show|set|match|cart|save (see `woolies help`)")
 	}
 	dir := o.str("dir", defaultRecipesDir())
 	args := pos[1:]
@@ -419,8 +419,14 @@ func cmdRecipe(pos []string, o opts) (obj, error) {
 
 	case "match":
 		return recipeMatch(dir, args, o)
+
+	case "cart":
+		return recipeCart(dir, args, o)
+
+	case "save":
+		return recipeSave(dir, args, o)
 	}
-	return nil, usageErr("unknown recipe subcommand %q. Use list, show, set or match", pos[0])
+	return nil, usageErr("unknown recipe subcommand %q. Use list, show, set, match, cart or save", pos[0])
 }
 
 // settable frontmatter fields and how to validate them.

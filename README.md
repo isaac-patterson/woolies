@@ -79,7 +79,7 @@ woolies store [--postcode <postcode>]
 woolies config                      effective settings and where each came from
 woolies addresses                   saved delivery addresses (ids for --address)
 woolies timeslots [--method Courier|Pickup] [--address <addressId>] [--all]   delivery windows (available only unless --all); read-only, never reserves
-woolies cart
+woolies cart [--summary] [--compact]   --summary: total, savings, item count, shortfall to the minimum spend and to each boosted offer
 woolies add <stockcode> [quantity=1]   puts the item in the cart AT that quantity (sets, does not increment)
 woolies add-many <file|->           JSON [{"stockcode":123,"quantity":2},...]
 woolies set-qty <stockcode> <quantity>
@@ -87,8 +87,8 @@ woolies remove <stockcode>
 woolies clear [--dry-run]           empty the whole cart (--dry-run only lists what would be removed)
 woolies quick-add <term...> [qty=1] [--dry-run]   search, set the top available Woolies-stocked result in the cart, report what was picked
 woolies orders [--order-id N] [--limit 5]   read-only
-woolies orders --latest                      newest order with its items in one call (read-only)
-woolies offers [--all]                        active Everyday Rewards points offers (read-only; never boosts). Only Woolworths shopping offers by default; --all adds partner promos
+woolies orders --latest [--active]           newest order with its items in one call (read-only). --active skips cancelled orders (also on the list); cancelled orders carry `cancelled` and `replacedBy`
+woolies offers [--all] [--cart [--reach 30]]   --cart checks offers against the cart (qualifies / within reach / estimated points); active Everyday Rewards points offers (read-only; never boosts). Only Woolworths shopping offers by default; --all adds partner promos
 woolies activate <offer id>... [--yes]   boost (activate) offers so purchases earn the points; without --yes it only shows what it would boost
 woolies activate --all [--yes]               every unboosted Woolworths shopping offer
 woolies cupboard add-latest [--file P] [--dry-run]   append newest order's items to a cupboard CSV, with pack size and per-100g nutrition (kj, protein, fat, sat fat, carbs, sugars, fibre, sodium) from each product page (skips rows already present for that order; default: `cupboard_file`)
@@ -97,6 +97,8 @@ woolies recipe list [--dir D]               slug, title, serves, cost_per_servin
 woolies recipe show <slug|title words>     parsed JSON (frontmatter, ingredients, method, notes, shoppingList, costBreakdown) plus raw markdown; partial matches, ambiguous = error listing candidates
 woolies recipe set <slug> [--serves N] [--cost-per-serving X] [--total-cost X] [--cost-basis T] [--cost-calculated YYYY-MM-DD] [--title T] [--dry-run]   edit frontmatter and the matching "Serves N" / "Total" prose lines; atomic, keeps <slug>.md.bak
 woolies recipe match <slug> [--file cupboard.csv]   shopping-list stockcodes vs the cupboard: have / low / missing / noStockcode (file-only)
+woolies recipe cart <slug> [--file cupboard.csv]    shopping list minus the cupboard, as `add-many` JSON (`addMany`) plus `buy` and `skipped` with reasons (file-only)
+woolies recipe save <file.json|-> [--force] [--dry-run]   write a validated recipe file and work out total_cost / cost_per_serving from pack price x quantity x share (file-only)
 ```
 
 Exit codes: 0 success, 1 failure (JSON error on stderr), 2 bad usage.
@@ -128,6 +130,15 @@ Before committing a change, run `make audit`; it must pass.
 - Cookies are never printed.
 - `timeslots` only lists windows; there is no command to reserve one. Pickup windows come back empty from this endpoint, so use `--method Courier` (the default).
 - Cart writes (`add`, `add-many`, `set-qty`, `remove`, `clear`, `quick-add`) set absolute quantities, as the Woolies API does, and return the cart re-read afterwards.
+
+## Compact output, variable weights and order status
+
+- `--compact` on `search`, `specials` and `cart` replaces the product arrays with one-line strings under `lines` (`stockcode | name | size | price | cup string | flags | xqty`). A leading `~` on the price means it is an estimate. Set `"compact": true` in the config (or `WOOLIES_COMPACT=true`) to make it the default; `--no-compact` gives the full JSON for one call, and `--nutrition` always does. One-line output drops fields such as nutrition, departments and `multibuy`, so scripts that read those fields should leave the setting off or pass `--no-compact`.
+- `isVariableWeight` and `priceIsEstimate` are set when a product's name or pack size has a weight range (such as `280g - 800g`) or says "approx". The shelf price is then only an estimate; the real charge depends on the weight picked. This is a text heuristic, as the site gives no flag for it.
+- `specials --all --match <regex>` filters by name (case-insensitive).
+- `cart --summary` adds a `summary` with the total, savings (the site's figure if the totals have one, else worked out from `wasPrice`), item count, shortfall to the minimum spend, and the shortfall to each boosted offer's minimum spend.
+- `offers --cart` adds `cartCheck`: offers the cart `qualifies` for, those `withinReach` (gap in dollars, `--reach` sets how far, 30 by default), `farAway`, in-store-only ones, `warnings`, and `estimatedPoints`. The estimate counts boosted offers only, takes the best multiplier (it includes the base points) plus all fixed offers, and treats product offers as needing that product's spend. It is an estimate, not the checkout figure.
+- A cancelled order has `cancelled: true`. Amending a placed order cancels it and creates a new order id, so a cancelled order whose pickup window matches a newer active one gets `replacedBy`. `orders --active` (list or `--latest`) skips cancelled ones, and the list result has the newest listed order's pickup `window` at the top level.
 
 ## Listing every deal
 
@@ -167,6 +178,7 @@ Settings live in a JSON file, `~/.woolies/config.json` (or the path in `WOOLIES_
 | `postcode` | `WOOLIES_POSTCODE` | none | `store`, when the account has no address |
 | `cupboard_file` | `WOOLIES_CUPBOARD_FILE` | `~/.woolies/cupboard.csv` | the `cupboard` commands and `recipe match` |
 | `recipes_dir` | `WOOLIES_RECIPES_DIR` | `~/.woolies/recipes` | the `recipe` commands |
+| `compact` | `WOOLIES_COMPACT` | `false` | `true` makes `search`, `specials` and `cart` print one line per item by default (`--no-compact` turns it off for a call; `--nutrition` always gets full JSON) |
 
 `WOOLIES_HOME` (default `~/.woolies`) moves the data folder: the config file, profile, lock file and specials cache. `WOOLIES_DEBUG=1` prints timings to stderr.
 
@@ -177,6 +189,8 @@ Settings live in a JSON file, `~/.woolies/config.json` (or the path in `WOOLIES_
 - `cmd/woolies/commands.go`: one function per command.
 - `cmd/woolies/specials.go`: `specials --all`: the paging, deal calculation and filters.
 - `cmd/woolies/recipe.go`: the file-only `recipe` commands (markdown parser, fuzzy lookup, `set`, `match`). Tests use copies of real recipes in `cmd/woolies/testdata/recipes/`.
+- `cmd/woolies/recipe_tools.go`: `recipe cart` and `recipe save`.
+- `cmd/woolies/insights.go`: `--compact` lines, `cart --summary` and the `offers --cart` check.
 - `cmd/woolies/specials_cache.go`: the `specials --all` cache.
 - `cmd/woolies/offers.go`: the `offers` command: captures the page's offers response and trims it.
 - `cmd/woolies/activate.go`: the `activate` command: resolves ids against the offers list and sends the boost call.

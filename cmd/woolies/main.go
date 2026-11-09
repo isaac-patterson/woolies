@@ -21,9 +21,13 @@ func help() string {
   woolies logout                      sign out (clears the profile's cookies and site data)
   woolies search <term...> [--page-size 8] [--sort TraderRelevance|PriceAsc|PriceDesc|Name] [--special] [--page 1] [--nutrition]
                                       --nutrition adds per-100g nutrition to each product (one extra request per product; keep --page-size small)
+                                      --compact (search, specials, cart): one line per item under "lines": stockcode | name | size | price (~ = estimate) | cup | flags | xqty
+                                      Make it the default with "compact": true in the config (or WOOLIES_COMPACT=true); --no-compact turns it off for a call.
+                                      --nutrition always gets full JSON, and --compact with it is an error
+                                      Variable-weight items (a "280g - 800g" range) carry isVariableWeight and priceIsEstimate; the shelf price is only an estimate
   woolies product <stockcode>
   woolies specials (--term <t> | --category <nodeId>) [--page-size 8] [--page 1]
-  woolies specials --all [--food] [--department <a,b>] [--min-discount <percent>] [--limit 200] [--max-pages 60] [--refresh] [--max-age 24]
+  woolies specials --all [--food] [--department <a,b>] [--min-discount <percent>] [--limit 200] [--max-pages 60] [--refresh] [--max-age 24] [--match <regex>]
                                       every current deal, biggest discount first; --limit 0 for no limit. Cached for --max-age hours and until the
                                       next Wednesday; a fetch takes around 2 minutes, a cached call is instant. --refresh fetches now
   woolies categories
@@ -31,7 +35,7 @@ func help() string {
   woolies config                      effective settings, where each came from, and the config file path
   woolies addresses                   saved delivery addresses (ids for --address)
   woolies timeslots [--method Courier|Pickup] [--address <addressId>] [--all]   delivery windows (available only unless --all); read-only, never reserves
-  woolies cart
+  woolies cart [--summary] [--compact]   --summary adds total, savings, item count, shortfall to the minimum spend and to each boosted offer's minimum
   woolies add <stockcode> [quantity=1]   puts the item in the cart AT that quantity (sets, does not increment)
   woolies add-many <file|->           JSON [{"stockcode":123,"quantity":2},...] (quantities are set, not incremented)
   woolies set-qty <stockcode> <quantity>
@@ -39,9 +43,13 @@ func help() string {
   woolies clear [--dry-run]           empty the whole cart (--dry-run only lists what would be removed)
   woolies quick-add <term...> [qty=1] [--dry-run]   search, set the top available Woolies-stocked result in the cart, report what was picked
   woolies orders [--order-id N] [--limit 5]   read-only
-  woolies orders --latest             newest order with its items in one call (header + items); picked by date, never filtered by status.
-                                      The status field is whatever the site reports and can lag the Woolies app
-  woolies offers [--all]
+  woolies orders --latest [--active]  newest order with its items in one call (header + items); picked by date, never filtered by status
+                                      unless --active, which skips cancelled orders (also works on the plain list). The status field is whatever the
+                                      site reports and can lag the Woolies app. Cancelled orders have cancelled:true; an amended order is cancelled and
+                                      replaced by a new id, shown as replacedBy. The list result has the newest order's pickup window at the top level
+  woolies offers [--all] [--cart [--reach 30]]
+                                      --cart checks the offers against the current cart: qualifies / withinReach (gap in dollars) / farAway, warnings,
+                                      and estimatedPoints (boosted offers only; best multiplier plus fixed offers)
                                       active Everyday Rewards points offers, with boosted true/false, dates, minimum spend and reward.
                                       Read-only: it reads the offers the home page loads and never boosts anything.
                                       By default only Woolworths shopping offers are shown; --all adds partner promos (banking, BIG W, gift cards)
@@ -68,6 +76,11 @@ func help() string {
                                       Atomic, keeps <slug>.md.bak, takes --dry-run. Costs are not recomputed when serves changes
   woolies recipe match <slug> [--file cupboard.csv]     shopping-list stockcodes vs the cupboard: have / low / missing / noStockcode
                                       (need = the recipe quantity or 1 pack; file-only, no browser or lock; all recipe commands take --dir)
+  woolies recipe cart <slug> [--file cupboard.csv]      shopping list minus the cupboard: addMany (JSON for add-many), buy (with reasons) and skipped.
+                                      Cupboard amounts can be fractions of a pack (0.35 of a bag still means buying the pack)
+  woolies recipe save <file.json|-> [--force] [--dry-run]   write a validated recipe file. JSON: title, serves, ingredients[], method[], notes[], atHome[],
+                                      shopping[{name, stockcode, quantity, price, share, detail}], optional slug, intro, date, costBasis, costNote.
+                                      Cost per line = pack price x quantity x share, rounded to the cent; total = sum of the rounded lines
   woolies cupboard add-latest [--file <path>] [--dry-run]
                                       append the newest order's items to a cupboard CSV with columns
                                       stockcode,item,qty,source,confirmed,size,size_qty,size_unit,storage, then per-100g nutrition
@@ -82,13 +95,13 @@ func help() string {
                                       Same newest-order logic as orders --latest
 
 Config: JSON at ~/.woolies/config.json (or $WOOLIES_CONFIG) with keys browser_path, profile_dir, postcode, cupboard_file,
-recipes_dir. Each can be overridden by an env var (WOOLIES_BROWSER_PATH, WOOLIES_PROFILE_DIR, WOOLIES_POSTCODE, WOOLIES_CUPBOARD_FILE,
-WOOLIES_RECIPES_DIR); flags win over both. WOOLIES_HOME moves ~/.woolies. Run "woolies config" to see what is in effect.
+recipes_dir, compact (true/false). Each can be overridden by an env var (WOOLIES_BROWSER_PATH, WOOLIES_PROFILE_DIR, WOOLIES_POSTCODE, WOOLIES_CUPBOARD_FILE,
+WOOLIES_RECIPES_DIR, WOOLIES_COMPACT); flags win over both. WOOLIES_HOME moves ~/.woolies. Run "woolies config" to see what is in effect.
 Calls launch a headless browser and are serialized; batch terms/items rather than looping.
 `
 }
 
-var booleanFlags = map[string]bool{"special": true, "nutrition": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true}
+var booleanFlags = map[string]bool{"special": true, "nutrition": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true, "compact": true, "no-compact": true, "summary": true, "cart": true, "active": true, "force": true}
 
 func parseArgs(args []string) ([]string, opts, error) {
 	var pos []string

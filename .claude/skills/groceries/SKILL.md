@@ -33,6 +33,7 @@ woolies specials --all [--food] [--department <a,b>] [--min-discount <percent>] 
 woolies categories
 woolies store [--postcode <postcode>]   # store details; the postcode defaults to the account address, then the config
 woolies config                      # the user's settings (cupboard_file, recipes_dir, postcode, ...)
+woolies cart [--summary] [--compact]   # --summary adds total, savings, item count and the shortfall to the minimum spend and to each boosted offer; --compact gives one line per item (also on search and specials). A leading ~ on a price means an estimate (isVariableWeight items)
 woolies cart                        # {success, cart:{items:[{stockcode,name,qty,unitPrice,...}], totals, totalQuantity, errors}}
 woolies add <stockcode> [quantity=1]   # sets the item to that quantity in the cart; it does NOT increment
 woolies add-many <file|->           # JSON array [{"stockcode":123,"quantity":2},...]; use: woolies add-many - <<'EOF' ... EOF
@@ -45,6 +46,8 @@ woolies timeslots [--method Courier|Pickup] [--address <addressId>] [--all]   # 
 woolies orders [--order-id N] [--limit 5]   # read-only past orders
 woolies logout                      # signs the user out (clears the profile); only when they ask
 woolies orders --latest             # newest order with its items in one call (picked by date, not filtered by status)
+woolies offers --cart [--reach 30]   # checks offers against the current cart: qualifies / withinReach (gap) / estimatedPoints / warnings. Use it before and after changing the cart, since a drop below an offer minimum loses its points
+woolies orders --latest --active   # newest order that is not cancelled (amending an order cancels it and creates a new id)
 woolies offers [--all]   # read-only Everyday Rewards points offers. Shows only Woolworths shopping offers unless --all
 woolies activate <offer id>... [--yes]   # boost offers (ids from `woolies offers`); WITHOUT --yes it only previews. Boosting is irreversible, so show the user what it would boost and run with --yes only after their yes. `--all` = every unboosted Woolworths offer
 woolies cupboard list|add|remove|use|set-qty|clear   # local cupboard file, no browser, whole-number qty; see Flow step 1
@@ -57,7 +60,7 @@ Input is either a list of items the user names ("soap, butter") or an ingredient
 2. **Resolve products.** Items that arrive with a stockcode: re-check availability and price (`woolies product` or a search). Everything else: one batched `woolies search` (use `--special`, compare `cupString`, ignore `isMarketProduct` and unavailable). Offer a few options only when the choice is not obvious; otherwise pick the cheapest sensible one.
 3. **Confirm.** Show a short table (item, qty, price, stockcode) and the estimated cart total; flag it if the total is under the minimum spend in their notes. Do not touch the cart until the user says yes in chat. A simple "add butter" still gets this one-line confirmation.
 4. **Fill the cart.** `woolies cart` (skip items already there by stockcode; `add` sets quantity, it does not increment; report unlisted items, never remove them unasked), `woolies store` (it must be the store named in their notes, else stop and ask), one `woolies add-many`, then `woolies cart` and report the total and any errors.
-5. **Checkout.** The user does the time slot and payment themselves on the website. The CLI has no checkout command; if one is added later, still confirm item list, total and slot in chat before paying.
+5. **Checkout.** There is no cart page or cart URL: the cart is a side panel opened from the trolley icon in the header of every page, so to show the user their cart, tell them to click the trolley icon (any `https://www.woolworths.com.au/` page works). `/shop/checkout` is the checkout itself, so don't send them there just to look at the cart. The user does the time slot and payment themselves on the website. The CLI has no checkout command; if one is added later, still confirm item list, total and slot in chat before paying.
 6. If the items came from a recipe, report the resolved stockcodes back so `/add-recipe` can save them in the recipe file.
 
 Preferences: cheap, filling, homely; compare unit prices; specials first (their notes may say more). The live cart is the source of truth; there is no separate list file.

@@ -170,6 +170,18 @@ func orZero(v any) any {
 }
 
 func cmdSearch(pos []string, o opts) (obj, error) {
+	compact, err := compactWanted(o)
+	if err != nil {
+		return nil, err
+	}
+	out, err := searchTerms(pos, o)
+	if err == nil && compact {
+		compactResult(out)
+	}
+	return out, err
+}
+
+func searchTerms(pos []string, o opts) (obj, error) {
 	if len(pos) == 0 {
 		return nil, usageErr("search needs at least one term")
 	}
@@ -199,9 +211,24 @@ func cmdProduct(pos []string, _ opts) (obj, error) {
 	return obj{"success": true, "product": data}, nil
 }
 
-func cmdSpecials(_ []string, o opts) (obj, error) {
+func cmdSpecials(pos []string, o opts) (obj, error) {
+	compact, err := compactWanted(o)
+	if err != nil {
+		return nil, err
+	}
+	out, err := specialsDispatch(pos, o)
+	if err == nil && compact {
+		compactResult(out)
+	}
+	return out, err
+}
+
+func specialsDispatch(_ []string, o opts) (obj, error) {
 	if _, all := o["all"]; all {
 		return cmdSpecialsAll(o)
+	}
+	if o.str("match", "") != "" {
+		return nil, usageErr("--match works with specials --all")
 	}
 	category, term := o.str("category", ""), o.str("term", "")
 	size, warning, err := pageSizeArg(o)
@@ -380,12 +407,32 @@ func cmdStore(_ []string, o opts) (obj, error) {
 
 // ---- cart ----
 
-func cmdCart(_ []string, _ opts) (obj, error) {
+func cmdCart(_ []string, o opts) (obj, error) {
 	data, err := request(homeURL+"/apis/ui/Trolley", "GET", "")
 	if err != nil {
 		return nil, err
 	}
-	return obj{"success": true, "cart": trimCart(data)}, nil
+	cart := trimCart(data)
+	out := obj{"success": true, "cart": cart}
+	if o.str("summary", "") == "true" {
+		var minSpend float64
+		if _, info, _, berr := bootstrapInfo(); berr == nil {
+			minSpend = toFloat(info["MinimumSpend"])
+		} else {
+			out["minimumSpendError"] = berr.Error()
+		}
+		offers, _, oerr := loadOffers(false)
+		if oerr != nil {
+			out["offersError"] = oerr.Error()
+		}
+		out["summary"] = cartSummary(cart, minSpend, offers)
+	}
+	if ok, err := compactWanted(o); err != nil {
+		return nil, err
+	} else if ok {
+		compactResult(out)
+	}
+	return out, nil
 }
 
 type cartItem struct {
@@ -746,6 +793,10 @@ func cmdOrders(_ []string, o opts) (obj, error) {
 	if latest && orderID != "" {
 		return nil, usageErr("--latest and --order-id cannot be combined")
 	}
+	active := o.str("active", "") == "true"
+	if active && orderID != "" {
+		return nil, usageErr("--active filters lists and --latest; it cannot be combined with --order-id")
+	}
 	if orderID != "" {
 		if _, err := strconv.ParseUint(orderID, 10, 64); err != nil {
 			return nil, usageErr("--order-id must be a number")
@@ -768,7 +819,7 @@ func cmdOrders(_ []string, o opts) (obj, error) {
 	}
 
 	if latest {
-		return fetchLatestOrder(s)
+		return fetchLatestOrder(s, active)
 	}
 
 	target := homeURL + "/shop/myaccount/myorders"
@@ -780,24 +831,50 @@ func cmdOrders(_ []string, o opts) (obj, error) {
 		return nil, err
 	}
 	if orderID != "" {
-		return orderDetail(bodies, orderID), nil
+		out := orderDetail(bodies, orderID)
+		if out["window"] == nil {
+			// The detail response may lack the pickup window; the order list carries it.
+			if listBodies, lerr := captureOrderBodies(s, homeURL+"/shop/myaccount/myorders"); lerr == nil {
+				for _, h := range orderSummaries(listBodies) {
+					if hm := asObj(h); str(hm["orderId"]) == orderID {
+						out["window"] = hm["window"]
+						if out["replacedBy"] == nil {
+							out["replacedBy"] = hm["replacedBy"]
+						}
+					}
+				}
+			}
+		}
+		return out, nil
 	}
 	unique := orderSummaries(bodies)
+	if active {
+		unique = activeOrders(unique)
+	}
 	count := len(unique)
 	if len(unique) > limit {
 		unique = unique[:limit]
 	}
-	return obj{"success": true, "count": count, "orders": unique}, nil
+	out := obj{"success": true, "count": count, "orders": unique}
+	// Surface the pickup window of the newest listed order at the top level.
+	if newest := newestOrder(unique); newest != nil && newest["window"] != nil {
+		out["window"] = newest["window"]
+	}
+	return out, nil
 }
 
 // fetchLatestOrder returns the newest order with its items, regardless of status (the status
 // the site reports can lag the app).
-func fetchLatestOrder(s *session) (obj, error) {
+func fetchLatestOrder(s *session, active bool) (obj, error) {
 	bodies, err := captureOrderBodies(s, homeURL+"/shop/myaccount/myorders")
 	if err != nil {
 		return nil, err
 	}
-	newest := newestOrder(orderSummaries(bodies))
+	summaries := orderSummaries(bodies)
+	if active {
+		summaries = activeOrders(summaries)
+	}
+	newest := newestOrder(summaries)
 	if newest == nil {
 		return obj{"success": false, "note": "No orders found on the orders page."}, nil
 	}
@@ -945,6 +1022,7 @@ func orderSummaries(bodies []capturedBody) []any {
 			}
 		}
 	}
+	markReplaced(unique)
 	return unique
 }
 

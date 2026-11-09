@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,6 +83,16 @@ func str(v any) string {
 
 // ---- Products ----
 
+// variableWeightRe matches a weight range such as "280g - 800g" in a product's name or pack size.
+// That is how the site labels meat and deli items sold by the piece at an estimated weight: the
+// shelf price is an estimate and the real charge depends on the weight picked (priced per kg).
+var variableWeightRe = regexp.MustCompile(`(?i)\b\d+(?:\.\d+)?\s*(?:kg|g)\s*-\s*\d+(?:\.\d+)?\s*(?:kg|g)\b|\bapprox\.?\s*\d`)
+
+// isVariableWeight reports whether a name or pack size marks a variable-weight product.
+func isVariableWeight(name, size any) bool {
+	return variableWeightRe.MatchString(str(name)) || variableWeightRe.MatchString(str(size))
+}
+
 func trimProduct(p obj) obj {
 	onSpecial := truthy(p["IsOnSpecial"])
 	out := obj{
@@ -96,6 +107,10 @@ func trimProduct(p obj) obj {
 	}
 	if onSpecial {
 		out["wasPrice"] = p["WasPrice"]
+	}
+	if isVariableWeight(out["displayName"], p["PackageSize"]) {
+		out["isVariableWeight"] = true
+		out["priceIsEstimate"] = true
 	}
 	if truthy(p["IsMarketProduct"]) {
 		out["marketplace"] = "third-party marketplace listing"
@@ -163,6 +178,17 @@ func trimCart(data any) obj {
 				set("unitPrice", first(n, "Price", "ListPrice"))
 				set("salePrice", n["SalePrice"])
 				set("wasPrice", n["WasPrice"])
+				set("packageSize", n["PackageSize"])
+				set("cupString", n["CupString"])
+				if v, ok := n["IsOnSpecial"].(bool); ok {
+					it["isOnSpecial"] = v
+				} else if sp, was := cartPrice(it), toFloat(n["WasPrice"]); sp > 0 && was > sp {
+					it["isOnSpecial"] = true
+				}
+				if isVariableWeight(it["name"], n["PackageSize"]) {
+					it["isVariableWeight"] = true
+					it["priceIsEstimate"] = true
+				}
 				if bucket != "AvailableItems" {
 					it["status"] = bucket
 				}
@@ -336,15 +362,75 @@ func trimOrderSummary(o obj) obj {
 	} else {
 		window = w
 	}
-	return obj{
+	status := pick(o, "currentstatus", "status")
+	out := obj{
 		"orderId":     pick(o, "orderid"),
-		"status":      pick(o, "currentstatus", "status"),
+		"status":      status,
 		"created":     pick(o, "createddate"),
 		"total":       pick(o, "total"),
 		"method":      pick(o, "deliverymethod"),
 		"pickupStore": pick(o, "pickupstorenumber"),
 		"window":      window,
 	}
+	if isCancelledStatus(status) {
+		out["cancelled"] = true
+		out["note"] = "CANCELLED. If the order was amended, the site cancels it and places a new order with a new id: use the newer active order (orders --latest --active)."
+	}
+	return out
+}
+
+func isCancelledStatus(status any) bool {
+	return strings.Contains(strings.ToLower(str(status)), "cancel")
+}
+
+// markReplaced sets replacedBy on a cancelled order when a newer, non-cancelled order has the
+// same pickup window and method, which is what an amended order looks like.
+func markReplaced(orders []any) {
+	for _, e := range orders {
+		c := asObj(e)
+		if c == nil || c["cancelled"] != true {
+			continue
+		}
+		ct, cok := parseOrderTime(c["created"])
+		cid, _ := strconv.ParseUint(str(c["orderId"]), 10, 64)
+		for _, f := range orders {
+			n := asObj(f)
+			if n == nil || n["cancelled"] == true || n["window"] == nil || marshalStr(n["window"]) != marshalStr(c["window"]) || str(n["method"]) != str(c["method"]) {
+				continue
+			}
+			nt, nok := parseOrderTime(n["created"])
+			nid, _ := strconv.ParseUint(str(n["orderId"]), 10, 64)
+			if (cok && nok && nt.After(ct)) || ((!cok || !nok) && nid > cid) {
+				c["replacedBy"] = n["orderId"]
+				break
+			}
+		}
+	}
+}
+
+// activeOrders drops cancelled orders.
+func activeOrders(orders []any) []any {
+	out := []any{}
+	for _, e := range orders {
+		if m := asObj(e); m != nil && m["cancelled"] == true {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func toFloat(v any) float64 {
+	f, _ := v.(float64)
+	return f
+}
+
+// cartPrice is the price a cart line is charged per unit: the sale price when there is one.
+func cartPrice(it obj) float64 {
+	if sp := toFloat(it["salePrice"]); sp > 0 {
+		return sp
+	}
+	return toFloat(it["unitPrice"])
 }
 
 func trimOrderItem(raw obj) obj {

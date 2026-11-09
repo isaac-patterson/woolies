@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -20,6 +21,7 @@ type config struct {
 	Postcode     string `json:"postcode,omitempty"`
 	CupboardFile string `json:"cupboard_file,omitempty"`
 	RecipesDir   string `json:"recipes_dir,omitempty"`
+	Compact      *bool  `json:"compact,omitempty"`
 }
 
 // setting describes one config key: its env variable and its built-in default.
@@ -41,6 +43,12 @@ var settings = []setting{
 		func() string { return filepath.Join(dataDir(), "cupboard.csv") }},
 	{"recipes_dir", "WOOLIES_RECIPES_DIR", func(c *config) string { return c.RecipesDir },
 		func() string { return filepath.Join(dataDir(), "recipes") }},
+	{"compact", "WOOLIES_COMPACT", func(c *config) string {
+		if c.Compact == nil {
+			return ""
+		}
+		return strconv.FormatBool(*c.Compact)
+	}, func() string { return "false" }},
 }
 
 func dataDir() string {
@@ -110,6 +118,28 @@ func expandHome(p string) string {
 		return filepath.Join(home, p[1:])
 	}
 	return p
+}
+
+// compactWanted decides whether search, specials and cart print one line per item. --compact and
+// --no-compact win, then the compact setting. With --nutrition the setting is ignored, because
+// one-line output has no room for the nutrition figures; an explicit --compact with it is an error.
+func compactWanted(o opts) (bool, error) {
+	yes, no := o.str("compact", "") == "true", o.str("no-compact", "") == "true"
+	switch {
+	case yes && no:
+		return false, usageErr("--compact and --no-compact cannot be combined")
+	case yes && o.str("nutrition", "") == "true":
+		return false, usageErr("--compact has no room for --nutrition; drop one of them")
+	case yes:
+		return true, nil
+	case no || o.str("nutrition", "") == "true":
+		return false, nil
+	}
+	v, err := strconv.ParseBool(get("compact"))
+	if err != nil {
+		return false, usageErr("compact setting (WOOLIES_COMPACT or config) must be true or false, got %q", get("compact"))
+	}
+	return v, nil
 }
 
 func profileDir() string          { return get("profile_dir") }

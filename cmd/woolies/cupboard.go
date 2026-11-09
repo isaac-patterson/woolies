@@ -57,7 +57,7 @@ func cmdCupboard(pos []string, o opts) (obj, error) {
 	if err != nil {
 		return nil, err
 	}
-	order, err := fetchLatestOrder(s)
+	order, err := fetchLatestOrder(s, false)
 	if err != nil {
 		return nil, err
 	}

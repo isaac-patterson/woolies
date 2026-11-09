@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"sync"
@@ -74,42 +75,66 @@ func browserCaptureOfferBodies(s *session, target string) ([]capturedBody, error
 	return bodies, nil
 }
 
-// cmdOffers lists the signed-in account's active Everyday Rewards offers. Read-only: it never
-// boosts anything.
-func cmdOffers(_ []string, o opts) (obj, error) {
-	includeAll := o.str("all", "") == "true"
-
+// loadOffers reads the account's offers from the home page. hidden counts the partner promos
+// dropped unless includeAll is set.
+func loadOffers(includeAll bool) (offers []obj, hidden int, err error) {
 	s, err := getSession()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	bodies, err := captureOfferBodies(s, homeURL+"/")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	everything := offerList(bodies)
 	if len(everything) == 0 {
-		return obj{"success": false, "note": "No offers came back. You may be signed out (run `woolies status`)."}, nil
+		return nil, 0, errNoOffers
 	}
 	// By default keep only offers for Woolworths shopping. The rest are partner promos
 	// (home loans, banking, BIG W, health brands, gift cards).
-	all := everything
-	if !includeAll {
-		all = all[:0:0]
-		for _, of := range everything {
-			if isWoolworthsOffer(of) {
-				all = append(all, of)
-			}
+	if includeAll {
+		return everything, 0, nil
+	}
+	for _, of := range everything {
+		if isWoolworthsOffer(of) {
+			offers = append(offers, of)
 		}
 	}
+	return offers, len(everything) - len(offers), nil
+}
 
+var errNoOffers = errors.New("no offers came back; you may be signed out (run `woolies status`)")
+
+// cmdOffers lists the signed-in account's active Everyday Rewards offers. Read-only: it never
+// boosts anything. With --cart it also checks them against the current cart.
+func cmdOffers(_ []string, o opts) (obj, error) {
+	includeAll := o.str("all", "") == "true"
+	all, hidden, err := loadOffers(includeAll)
+	if errors.Is(err, errNoOffers) {
+		return obj{"success": false, "note": "No offers came back. You may be signed out (run `woolies status`)."}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	boosted := 0
 	for _, of := range all {
 		if of["boosted"] == true {
 			boosted++
 		}
 	}
-	return obj{"success": true, "total": len(all), "boosted": boosted, "hidden": len(everything) - len(all), "offers": all}, nil
+	out := obj{"success": true, "total": len(all), "boosted": boosted, "hidden": hidden, "offers": all}
+	if o.str("cart", "") == "true" {
+		reach, err := reachArg(o)
+		if err != nil {
+			return nil, err
+		}
+		data, err := request(homeURL+"/apis/ui/Trolley", "GET", "")
+		if err != nil {
+			return nil, err
+		}
+		out["cartCheck"] = offerEval(trimCart(data), all, reach)
+	}
+	return out, nil
 }
 
 // woolworthsBanners are the banner ids on offers for Woolworths supermarkets (and Metro).
