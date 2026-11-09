@@ -40,6 +40,9 @@ func help() string {
   woolies orders [--order-id N] [--limit 5]   read-only
   woolies orders --latest             newest order with its items in one call (header + items); picked by date, never filtered by status.
                                       The status field is whatever the site reports and can lag the Woolies app
+  woolies offers [--unboosted] [--section WEEKLY_BOOSTERS] [--search <text>]
+                                      active Everyday Rewards points offers, with boosted true/false, dates, minimum spend and reward.
+                                      Read-only: it reads the offers the home page loads and never boosts anything
   woolies cupboard list [--file P] [--search text]      all rows (item substring filter), with total
   woolies cupboard add <item...> [--qty N] [--source had|elsewhere|..] [--stockcode N] [--size 500g]
                                       add by hand (default source had, confirmed today); if the stockcode (else item name) is already
@@ -76,7 +79,7 @@ Calls launch a headless browser and are serialized; batch terms/items rather tha
 `
 }
 
-var booleanFlags = map[string]bool{"special": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true}
+var booleanFlags = map[string]bool{"special": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true, "unboosted": true}
 
 func parseArgs(args []string) ([]string, opts, error) {
 	var pos []string
@@ -120,6 +123,7 @@ var commands = map[string]func([]string, opts) (obj, error){
 	"clear":      cmdClear,
 	"quick-add":  cmdQuickAdd,
 	"orders":     cmdOrders,
+	"offers":     cmdOffers,
 	"cupboard":   cmdCupboard,
 	"recipe":     cmdRecipe,
 	"logout":     cmdLogout,

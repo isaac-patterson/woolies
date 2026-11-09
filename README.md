@@ -88,6 +88,7 @@ woolies clear [--dry-run]           empty the whole cart (--dry-run only lists w
 woolies quick-add <term...> [qty=1] [--dry-run]   search, set the top available Woolies-stocked result in the cart, report what was picked
 woolies orders [--order-id N] [--limit 5]   read-only
 woolies orders --latest                      newest order with its items in one call (read-only)
+woolies offers [--unboosted] [--section S] [--search text]   active Everyday Rewards points offers (read-only; never boosts)
 woolies cupboard add-latest [--file P] [--dry-run]   append newest order's items to a cupboard CSV (skips rows already present for that order; default: `cupboard_file`)
 woolies cupboard list|add|remove|use|set-qty|clear ...   manage the cupboard CSV by hand (file-only, no browser or lock; writes are atomic, keep a .bak, and take --dry-run; `clear` needs --yes). See `woolies help`
 woolies recipe list [--dir D]               slug, title, serves, cost_per_serving (default: `recipes_dir`)
