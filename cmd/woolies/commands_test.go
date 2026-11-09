@@ -41,6 +41,46 @@ func TestSearchOneTerm(t *testing.T) {
 	}
 }
 
+func TestSearchNutrition(t *testing.T) {
+	panel := `{"Product": {"PackageSize": "2L"}, "NutritionalInformation": [
+		{"Name": "Protein", "ServingSize": "250 ML", "ServingsPerPack": "8", "Values": {"Quantity Per 100g / 100mL": "3.4g"}},
+		{"Name": "Energy", "ServingSize": "250 ML", "ServingsPerPack": "8", "Values": {"Quantity Per 100g / 100mL": "270kJ"}},
+		{"Name": "\u2013 Saturated", "ServingSize": "250 ML", "ServingsPerPack": "8", "Values": {"Quantity Per 100g / 100mL": "< 1.0g"}}]}`
+	f := useFakeSite(t, map[string]any{
+		"POST /apis/ui/Search/products":  searchResults,
+		"GET /apis/ui/product/detail/11": panel,
+		"GET /apis/ui/product/detail/12": `{"Product": {"PackageSize": "each"}, "NutritionalInformation": []}`,
+		"GET /apis/ui/product/detail/13": errors.New("down"),
+	})
+	res := mustOK(t)(cmdSearch([]string{"milk"}, opts{"nutrition": "true"}))
+	prods := res["products"].([]any)
+	milk, market, oat := prods[0].(obj), prods[1].(obj), prods[2].(obj)
+	nut := asObj(milk["nutrition"])
+	if nut["protein_g"] != 3.4 || nut["kj"] != 270.0 || len(nut) != 2 {
+		t.Errorf("nutrition keeps only listed figures (a < bound is not one): %v", milk["nutrition"])
+	}
+	if v, ok := market["nutrition"]; !ok || v != nil {
+		t.Errorf("a product with no figures gets nutrition: null, got %v (present %v)", v, ok)
+	}
+	if oat["nutritionError"] != "down" || oat["nutrition"] != nil {
+		t.Errorf("a failed lookup is reported on the product, not the search: %v", oat)
+	}
+	if n := len(f.callsTo("GET /apis/ui/product/detail/11")) + len(f.callsTo("GET /apis/ui/product/detail/12")) + len(f.callsTo("GET /apis/ui/product/detail/13")); n != 3 {
+		t.Errorf("want one detail call per product, got %d", n)
+	}
+}
+
+func TestSearchWithoutNutritionMakesNoDetailCalls(t *testing.T) {
+	f := useFakeSite(t, map[string]any{"POST /apis/ui/Search/products": searchResults})
+	res := mustOK(t)(cmdSearch([]string{"milk"}, opts{}))
+	if len(f.calls) != 1 {
+		t.Errorf("calls = %d, want just the search", len(f.calls))
+	}
+	if _, ok := asObj(res["products"].([]any)[0])["nutrition"]; ok {
+		t.Error("nutrition key present without --nutrition")
+	}
+}
+
 func TestSearchPageSize(t *testing.T) {
 	f := useFakeSite(t, map[string]any{"POST /apis/ui/Search/products": searchResults})
 	res := mustOK(t)(cmdSearch([]string{"milk"}, opts{"page-size": "50"}))

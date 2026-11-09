@@ -112,12 +112,46 @@ func searchOne(term string, o opts) obj {
 		return obj{"success": false, "searchTerm": term, "error": err.Error()}
 	}
 	d := asObj(data)
+	products := capN(flattenProducts(d["Products"]), size)
+	if _, want := o["nutrition"]; want {
+		addNutrition(products)
+	}
 	return addWarning(obj{
 		"success":      true,
 		"searchTerm":   term,
 		"totalResults": orZero(d["SearchResultsCount"]),
-		"products":     capN(flattenProducts(d["Products"]), size),
+		"products":     products,
 	}, warning)
+}
+
+// addNutrition looks up each product's detail page and adds its per-100g nutrition (the keys of
+// nutritionCols, only those the product lists). It costs one extra request per product. A product with
+// no figures gets "nutrition": null so "none listed" is distinct from "not asked for", and a failed
+// lookup puts the reason in "nutritionError" without failing the search.
+func addNutrition(products []any) {
+	for _, p := range products {
+		m := asObj(p)
+		data, err := request(homeURL+"/apis/ui/product/detail/"+url.PathEscape(str(m["stockcode"])), "GET", "")
+		if err != nil {
+			m["nutritionError"] = err.Error()
+			continue
+		}
+		info := sizeFromProduct(asObj(data))
+		nut := obj{}
+		for i, name := range nutritionCols {
+			if info.Nut[i] == "" {
+				continue
+			}
+			if f, err := strconv.ParseFloat(info.Nut[i], 64); err == nil {
+				nut[name] = f
+			}
+		}
+		if len(nut) == 0 {
+			m["nutrition"] = nil
+			continue
+		}
+		m["nutrition"] = nut
+	}
 }
 
 // capN trims a slice to n items; the API can return more than the requested page size.

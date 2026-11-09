@@ -24,7 +24,8 @@ const (
 	colSizeQty
 	colSizeUnit
 	colStorage
-	nCols
+	colNutrition // first of the nutritionCols
+	nCols        = colNutrition + 8
 )
 
 // cupboardFileOnly reports whether a `cupboard` invocation needs no browser.
@@ -36,10 +37,12 @@ type cupboardFile struct {
 	raw      []byte
 	rows     [][]string // padded to nCols, header excluded
 	oldShape bool       // file had the 5-column header
+	width    int        // columns written back: the file's own width (at least the sized format), so a
+	// file without nutrition columns stays that way until add-latest back-fills them
 }
 
 func loadCupboard(path string) (*cupboardFile, error) {
-	f := &cupboardFile{path: path}
+	f := &cupboardFile{path: path, width: nCols}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return f, nil
@@ -55,6 +58,7 @@ func loadCupboard(path string) (*cupboardFile, error) {
 	}
 	if len(recs) > 0 && len(recs[0]) > 0 && recs[0][0] == "stockcode" {
 		f.oldShape = len(recs[0]) <= oldCupboardCols
+		f.width = min(max(len(recs[0]), sizedCupboardCols), nCols)
 		recs = recs[1:]
 	} else if len(recs) > 0 {
 		return nil, errors.New("cupboard file has no recognisable header; not touching it")
@@ -71,8 +75,11 @@ func loadCupboard(path string) (*cupboardFile, error) {
 func (f *cupboardFile) save() error {
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
-	w.Write(cupboardHeader)
-	w.WriteAll(f.rows)
+	w.Write(cupboardHeader[:f.width])
+	for _, r := range f.rows {
+		w.Write(r[:f.width])
+	}
+	w.Flush()
 	if err := w.Error(); err != nil {
 		return err
 	}

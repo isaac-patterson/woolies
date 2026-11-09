@@ -70,7 +70,7 @@ The skills hold no personal details. They read yours from a `CLAUDE.md` in the s
 woolies status                      logged in? store id, reserved slot, minimum spend, cart summary
 woolies login                       visible browser for manual sign-in (close the window when done; it then verifies the login)
 woolies logout                      sign out (clears the profile's cookies and site data)
-woolies search <term...> [--page-size 8] [--sort TraderRelevance|PriceAsc|PriceDesc|Name] [--special] [--page 1]
+woolies search <term...> [--page-size 8] [--sort TraderRelevance|PriceAsc|PriceDesc|Name] [--special] [--page 1] [--nutrition]   --nutrition adds per-100g nutrition to each product (one extra request per product; keep --page-size small)
 woolies product <stockcode>
 woolies specials (--term <t> | --category <nodeId>) [--page-size 8] [--page 1]
 woolies specials --all [--food] [--department <a,b>] [--min-discount <percent>] [--limit 200] [--max-pages 60] [--refresh] [--max-age 24]   every current deal, biggest discount first (cached)
@@ -89,7 +89,7 @@ woolies quick-add <term...> [qty=1] [--dry-run]   search, set the top available 
 woolies orders [--order-id N] [--limit 5]   read-only
 woolies orders --latest                      newest order with its items in one call (read-only)
 woolies offers [--all]                        active Everyday Rewards points offers (read-only; never boosts). Only Woolworths shopping offers by default; --all adds partner promos
-woolies cupboard add-latest [--file P] [--dry-run]   append newest order's items to a cupboard CSV (skips rows already present for that order; default: `cupboard_file`)
+woolies cupboard add-latest [--file P] [--dry-run]   append newest order's items to a cupboard CSV, with pack size and per-100g nutrition (kj, protein, fat, sat fat, carbs, sugars, fibre, sodium) from each product page (skips rows already present for that order; default: `cupboard_file`)
 woolies cupboard list|add|remove|use|set-qty|clear ...   manage the cupboard CSV by hand (file-only, no browser or lock; writes are atomic, keep a .bak, and take --dry-run; `clear` needs --yes). See `woolies help`
 woolies recipe list [--dir D]               slug, title, serves, cost_per_serving (default: `recipes_dir`)
 woolies recipe show <slug|title words>     parsed JSON (frontmatter, ingredients, method, notes, shoppingList, costBreakdown) plus raw markdown; partial matches, ambiguous = error listing candidates

@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,11 +14,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
-var cupboardHeader = []string{"stockcode", "item", "qty", "source", "confirmed", "size", "size_qty", "size_unit", "storage"}
+// nutritionCols are the per-100g nutrition columns, in file order. Energy is kJ, sodium is mg and
+// everything else is grams. Blank means the product has no figure (or only a "<1" style bound).
+var nutritionCols = []string{"kj", "protein_g", "fat_g", "sat_fat_g", "carb_g", "sugars_g", "fibre_g", "sodium_mg"}
 
-const oldCupboardCols = 5
+var cupboardHeader = append([]string{"stockcode", "item", "qty", "source", "confirmed", "size", "size_qty", "size_unit", "storage"}, nutritionCols...)
+
+const (
+	oldCupboardCols   = 5 // the first file format: no size columns
+	sizedCupboardCols = 9 // the second: size columns, no nutrition
+)
 
 // sizeInfo is the pack size and storage note recorded for a product. Empty fields mean unknown.
 type sizeInfo struct {
@@ -24,7 +34,8 @@ type sizeInfo struct {
 	Qty     string // normalised number, e.g. "700"
 	Unit    string // g, ml or each
 	Storage string
-	Source  string // "package" or "nutrition" (servings x serving size); informational
+	Source  string    // "package" or "nutrition" (servings x serving size); informational
+	Nut     [8]string // per-100g nutrition, one entry per nutritionCols
 }
 
 // cmdCupboard handles `woolies cupboard add-latest`. It only reads Woolies; the single write
@@ -93,7 +104,7 @@ func fetchSizeInfo(code string) (sizeInfo, error) {
 	return sizeFromProduct(asObj(data)), nil
 }
 
-// sizeFromProduct derives the size fields from a product-detail response.
+// sizeFromProduct derives the size and nutrition fields from a product-detail response.
 func sizeFromProduct(d obj) sizeInfo {
 	var info sizeInfo
 	p := asObj(d["Product"])
@@ -101,6 +112,7 @@ func sizeFromProduct(d obj) sizeInfo {
 	if attrs == nil {
 		attrs = asObj(p["AdditionalAttributes"])
 	}
+	info.Nut = nutritionFromProduct(d)
 	info.Storage = cleanStorage(str(attrs["storageinstructions"]))
 	if ps := strings.TrimSpace(str(p["PackageSize"])); ps != "" {
 		if q, u, ok := parsePackSize(ps); ok {
@@ -109,12 +121,134 @@ func sizeFromProduct(d obj) sizeInfo {
 		}
 	}
 	// Fallback: servings per pack x serving size.
-	spp, err1 := strconv.ParseFloat(strings.TrimSpace(str(attrs["servingsperpack-total-nip"])), 64)
-	if q, u, ok := parsePackSize(str(attrs["servingsize-total-nip"])); ok && err1 == nil && spp > 0 && u != "each" {
-		info.Size = fmtNum(q*spp) + u
-		info.Qty, info.Unit, info.Source = fmtNum(q*spp), u, "nutrition"
+	if q, u, ok := servingsTotal(d, attrs); ok && u != "each" {
+		info.Size = fmtNum(q) + u
+		info.Qty, info.Unit, info.Source = fmtNum(q), u, "nutrition"
 	}
 	return info
+}
+
+// nipRows returns the product's nutrition panel rows, from the top level or the Product object.
+func nipRows(d obj) []obj {
+	rows := asArr(d["NutritionalInformation"])
+	if rows == nil {
+		rows = asArr(asObj(d["Product"])["NutritionalInformation"])
+	}
+	var out []obj
+	for _, r := range rows {
+		if m := asObj(r); m != nil {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// nipAttrs reads the flat "Name - Total - NIP" attributes that some products carry as a JSON
+// string in AdditionalAttributes["nutritionalinformation"].
+func nipAttrs(attrs obj) map[string]string {
+	out := map[string]string{}
+	var doc struct {
+		Attributes []struct{ Name, Value string }
+	}
+	if json.Unmarshal([]byte(str(attrs["nutritionalinformation"])), &doc) != nil {
+		return out
+	}
+	for _, a := range doc.Attributes {
+		out[a.Name] = a.Value
+	}
+	return out
+}
+
+// servingsTotal works out pack contents (servings per pack x serving size) from whichever source has
+// both numbers: the flat attributes, the panel rows, or the nested NIP attributes.
+func servingsTotal(d, attrs obj) (float64, string, bool) {
+	cands := [][2]string{{str(attrs["servingsize-total-nip"]), str(attrs["servingsperpack-total-nip"])}}
+	if rows := nipRows(d); len(rows) > 0 {
+		cands = append(cands, [2]string{str(rows[0]["ServingSize"]), str(rows[0]["ServingsPerPack"])})
+	}
+	nested := nipAttrs(attrs)
+	cands = append(cands, [2]string{nested["Serving Size - Total - NIP"], nested["Servings Per Pack - Total - NIP"]})
+	for _, c := range cands {
+		spp, err := strconv.ParseFloat(strings.TrimSpace(c[1]), 64)
+		if q, u, ok := parsePackSize(c[0]); ok && err == nil && spp > 0 {
+			return q * spp, u, true
+		}
+	}
+	return 0, "", false
+}
+
+var nutValueRe = regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*(kj|kcal|cal|g|mg|mcg|µg|ug)$`)
+
+// nutValue converts a label value such as "72.0g" or "30.0mg" to the column's unit: "kj", "mg" or "g".
+// Bounds ("< 1.0g") and values in an unexpected unit give "" rather than a guess.
+func nutValue(s, want string) string {
+	t := strings.ToLower(strings.TrimSpace(s))
+	t = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(t, "approx."), "approx")) // a stated estimate, unlike a "<" bound
+	m := nutValueRe.FindStringSubmatch(t)
+	if m == nil {
+		return ""
+	}
+	n, _ := strconv.ParseFloat(m[1], 64)
+	energy := m[2] == "kj" || m[2] == "kcal" || m[2] == "cal"
+	if energy != (want == "kj") {
+		return "" // energy in a mass column, or mass in the energy column
+	}
+	v := n
+	switch m[2] {
+	case "kcal", "cal":
+		v = n * 4.184
+	case "mg":
+		v = n / 1000 // to grams
+	case "mcg", "µg", "ug":
+		v = n / 1000000
+	}
+	if want == "mg" {
+		v *= 1000 // grams to mg
+	}
+	return fmtNum(math.Round(v*1000) / 1000)
+}
+
+// nutritionFromProduct reads per-100g values, preferring the panel rows and filling any gaps from the
+// flat NIP attributes.
+func nutritionFromProduct(d obj) [8]string {
+	var out [8]string
+	unit := func(i int) string {
+		switch i {
+		case 0:
+			return "kj"
+		case 7:
+			return "mg"
+		}
+		return "g"
+	}
+	rowIdx := map[string]int{"energy": 0, "protein": 1, "fat, total": 2, "fat total": 2, "saturated": 3, "fat, saturated": 3,
+		"carbohydrate": 4, "sugars": 5, "dietary fibre": 6, "sodium": 7}
+	for _, r := range nipRows(d) {
+		name := strings.ToLower(strings.TrimLeftFunc(str(r["Name"]), func(c rune) bool { return !unicode.IsLetter(c) }))
+		i, ok := rowIdx[strings.TrimSpace(name)]
+		if !ok {
+			continue
+		}
+		for k, v := range asObj(r["Values"]) {
+			if lk := strings.ToLower(k); strings.Contains(lk, "100g") || strings.Contains(lk, "100ml") {
+				out[i] = nutValue(str(v), unit(i))
+				break
+			}
+		}
+	}
+	attrs := asObj(d["AdditionalAttributes"])
+	if attrs == nil {
+		attrs = asObj(asObj(d["Product"])["AdditionalAttributes"])
+	}
+	flatIdx := map[string]int{"Energy kJ": 0, "Protein": 1, "Fat Total": 2, "Fat Saturated": 3, "Carbohydrate": 4,
+		"Sugars": 5, "Dietary Fibre": 6, "Sodium": 7}
+	const suffix = " Quantity Per 100g - Total - NIP"
+	for name, v := range nipAttrs(attrs) {
+		if i, ok := flatIdx[strings.TrimSuffix(name, suffix)]; ok && strings.HasSuffix(name, suffix) && out[i] == "" {
+			out[i] = nutValue(v, unit(i))
+		}
+	}
+	return out
 }
 
 func fmtNum(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
@@ -180,10 +314,24 @@ type cupboardResult struct {
 
 func sizeCols(i sizeInfo) []string { return []string{i.Size, i.Qty, i.Unit, i.Storage} }
 
+func nutCols(i sizeInfo) []string { return append([]string{}, i.Nut[:]...) }
+
+// allCols is every column after the first five (the size columns, then the nutrition columns).
+func allCols(i sizeInfo) []string { return append(sizeCols(i), nutCols(i)...) }
+
 func sizeEntry(code, item string, i sizeInfo) obj {
 	e := obj{"stockcode": code, "item": item, "size": i.Size, "size_qty": i.Qty, "size_unit": i.Unit, "storage": i.Storage}
 	if i.Source != "" {
 		e["sizeSource"] = i.Source
+	}
+	nut := obj{}
+	for k, name := range nutritionCols {
+		if i.Nut[k] != "" {
+			nut[name] = i.Nut[k]
+		}
+	}
+	if len(nut) > 0 {
+		e["nutrition"] = nut
 	}
 	return e
 }
@@ -211,10 +359,14 @@ func applyCupboard(path string, order obj, today string, dry bool, lookup func(s
 		}
 	}
 	hasHeader := len(recs) > 0 && len(recs[0]) > 0 && recs[0][0] == "stockcode"
-	oldFormat := hasHeader && len(recs[0]) <= oldCupboardCols
-	if hasHeader && len(recs[0]) > oldCupboardCols && len(recs[0]) != len(cupboardHeader) {
-		return res, fmt.Errorf("unrecognised cupboard header %v", recs[0])
+	var oldFormat bool
+	if hasHeader {
+		if w := len(recs[0]); w > oldCupboardCols && w != sizedCupboardCols && w != len(cupboardHeader) {
+			return res, fmt.Errorf("unrecognised cupboard header %v", recs[0])
+		}
 	}
+	// oldFormat is any header narrower than the current one; those files are rebuilt in place.
+	oldFormat = hasHeader && len(recs[0]) < len(cupboardHeader)
 	res.migrated = oldFormat
 
 	have := map[string]bool{}
@@ -241,13 +393,14 @@ func applyCupboard(path string, order obj, today string, dry bool, lookup func(s
 		}
 		have[code+"|"+source] = true
 		info := lookup(code)
-		rows = append(rows, append([]string{code, str(m["name"]), str(m["qty"]), source, today}, sizeCols(info)...))
+		rows = append(rows, append([]string{code, str(m["name"]), str(m["qty"]), source, today}, allCols(info)...))
 		e := sizeEntry(code, str(m["name"]), info)
 		e["qty"], e["source"] = str(m["qty"]), source
 		res.added = append(res.added, e)
 	}
 
-	// Migration: rebuild existing rows with the size columns.
+	// Migration: rebuild existing rows with the current columns. Rows that already have size columns
+	// keep them (they may have been edited by hand); only the missing columns are filled in.
 	var migratedRows [][]string
 	if oldFormat {
 		for _, r := range body {
@@ -255,8 +408,16 @@ func applyCupboard(path string, order obj, today string, dry bool, lookup func(s
 			for len(row) < oldCupboardCols {
 				row = append(row, "")
 			}
-			info := lookup(row[0])
-			migratedRows = append(migratedRows, append(row[:oldCupboardCols], sizeCols(info)...))
+			var info sizeInfo
+			if strings.TrimSpace(row[0]) != "" {
+				info = lookup(row[0])
+			}
+			if len(r) >= sizedCupboardCols {
+				row = append(row[:sizedCupboardCols], nutCols(info)...)
+			} else {
+				row = append(row[:oldCupboardCols], allCols(info)...)
+			}
+			migratedRows = append(migratedRows, row)
 			res.backfilled = append(res.backfilled, sizeEntry(row[0], row[1], info))
 		}
 		res.backup = backupPath(path)

@@ -65,11 +65,14 @@ func help() string {
                                       (need = the recipe quantity or 1 pack; file-only, no browser or lock; all recipe commands take --dir)
   woolies cupboard add-latest [--file <path>] [--dry-run]
                                       append the newest order's items to a cupboard CSV with columns
-                                      stockcode,item,qty,source,confirmed,size,size_qty,size_unit,storage. source is "order <id>",
+                                      stockcode,item,qty,source,confirmed,size,size_qty,size_unit,storage, then per-100g nutrition
+                                      kj,protein_g,fat_g,sat_fat_g,carb_g,sugars_g,fibre_g,sodium_mg (blank when the product has no figure
+                                      or only a "<1" bound; the file is not guessed at). source is "order <id>",
                                       confirmed is today. Sizes come from each product's page (g/ml/each, kg->g and L->ml; blank when
                                       unknown, never guessed). Skips stockcodes already present with the same source, so re-running is
-                                      safe; creates the file with a header if missing. An old 5-column file is upgraded in place
-                                      (copied to <file>.bak first) and its rows get sizes back-filled. Default file
+                                      safe; creates the file with a header if missing. An older file (5 columns, or 9 without nutrition)
+                                      is upgraded in place (copied to <file>.bak first); its rows get sizes and nutrition back-filled,
+                                      keeping any size you edited by hand. The file-only commands leave a 9-column file at 9 columns. Default file
                                       cupboard_file from the config. --dry-run reports adds and back-fills without writing or backing up.
                                       Same newest-order logic as orders --latest
 
@@ -80,7 +83,7 @@ Calls launch a headless browser and are serialized; batch terms/items rather tha
 `
 }
 
-var booleanFlags = map[string]bool{"special": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true}
+var booleanFlags = map[string]bool{"special": true, "nutrition": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true}
 
 func parseArgs(args []string) ([]string, opts, error) {
 	var pos []string

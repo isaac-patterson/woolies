@@ -136,7 +136,7 @@ func TestCupboardOldFormatUpgradedOnWrite(t *testing.T) {
 	if _, err := runCup(p, opts{}, "set-qty", "Milk", "4"); err != nil {
 		t.Fatal(err)
 	}
-	if read(p) != newHeader+"1,Milk,4,had,2026-01-01,,,,\n" || read(p+".bak") != old {
+	if read(p) != sizedHeader+"1,Milk,4,had,2026-01-01,,,,\n" || read(p+".bak") != old {
 		t.Fatal(read(p))
 	}
 }
