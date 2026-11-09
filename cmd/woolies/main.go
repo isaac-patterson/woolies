@@ -40,9 +40,10 @@ func help() string {
   woolies orders [--order-id N] [--limit 5]   read-only
   woolies orders --latest             newest order with its items in one call (header + items); picked by date, never filtered by status.
                                       The status field is whatever the site reports and can lag the Woolies app
-  woolies offers [--unboosted] [--section WEEKLY_BOOSTERS] [--search <text>]
+  woolies offers [--unboosted] [--section WEEKLY_BOOSTERS] [--search <text>] [--all]
                                       active Everyday Rewards points offers, with boosted true/false, dates, minimum spend and reward.
-                                      Read-only: it reads the offers the home page loads and never boosts anything
+                                      Read-only: it reads the offers the home page loads and never boosts anything.
+                                      By default only Woolworths shopping offers are shown; --all adds partner promos (banking, BIG W, gift cards)
   woolies cupboard list [--file P] [--search text]      all rows (item substring filter), with total
   woolies cupboard add <item...> [--qty N] [--source had|elsewhere|..] [--stockcode N] [--size 500g]
                                       add by hand (default source had, confirmed today); if the stockcode (else item name) is already

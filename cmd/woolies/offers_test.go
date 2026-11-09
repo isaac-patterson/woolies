@@ -6,11 +6,14 @@ import (
 )
 
 const offersFixture = `{"data":[
- {"type":"STANDARD_OFFER","id":"a1","attributes":{"boostState":"NOT_BOOSTED","status":"ACTIVE",
+ {"type":"STANDARD_OFFER","id":"a1","attributes":{"boostState":"NOT_BOOSTED","status":"ACTIVE","summary":{"bannerIds":["1005","1030"]},
   "display":{"section":"WEEKLY_BOOSTERS","heading":"Collect 60 points","description":{"summary":"Zucchinis (Minimum Spend $3)*"},"termsAndConditions":"long terms","primaryProductId":"170225"},
   "redemption":{"startDateTime":"2026-11-04T00:00:00.000+11:00","endDateTime":"2026-11-10T23:59:59.000+11:00"},
   "coupons":[{"attributes":{"reward":{"type":"POINTS_FIXED","value":60},"redemption":{"minimumSpend":300,"eligibleSalesChannels":["INSTORE","ONLINE_WEB"]}}}]}},
- {"type":"STANDARD_OFFER","id":"b2","attributes":{"boostState":"BOOSTED","status":"ACTIVE",
+ {"type":"STANDARD_OFFER","id":"c3","attributes":{"boostState":"NOT_BOOSTED","status":"ACTIVE","summary":{"bannerIds":["88"]},
+  "display":{"section":"DEFAULT","heading":"Say hello to CommBank","description":{"summary":"Bank promo"}},
+  "redemption":{},"coupons":[]}},
+ {"type":"STANDARD_OFFER","id":"b2","attributes":{"boostState":"BOOSTED","status":"ACTIVE","summary":{"bannerIds":["1005"]},
   "display":{"section":"DEFAULT","heading":"3% off eGift Card","description":{"summary":"Gift cards"}},
   "redemption":{"startDateTime":"2026-11-01T00:00:00.000+11:00","endDateTime":"2026-11-30T23:59:59.000+11:00"},"coupons":[]}}
 ]}`
@@ -48,6 +51,24 @@ func TestOffersList(t *testing.T) {
 	}
 	if _, ok := first["termsAndConditions"]; ok {
 		t.Fatal("terms should be dropped")
+	}
+}
+
+func TestOffersHidesPartnerPromosByDefault(t *testing.T) {
+	useFakeSession(t)
+	useFakeOffers(t, []capturedBody{{"x", decode(t, offersFixture)}}, nil)
+	res := mustOK(t)(cmdOffers(nil, opts{}))
+	if res["total"] != 2 || res["count"] != 2 || res["hidden"] != 1 {
+		t.Fatalf("default: %v", res)
+	}
+	for _, of := range res["offers"].([]obj) {
+		if of["id"] == "c3" {
+			t.Fatal("partner promo should be hidden")
+		}
+	}
+	res = mustOK(t)(cmdOffers(nil, opts{"all": "true"}))
+	if res["total"] != 3 || res["count"] != 3 || res["hidden"] != 0 {
+		t.Fatalf("--all: %v", res)
 	}
 }
 

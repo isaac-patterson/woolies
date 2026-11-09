@@ -78,6 +78,7 @@ func browserCaptureOfferBodies(s *session, target string) ([]capturedBody, error
 // boosts anything.
 func cmdOffers(_ []string, o opts) (obj, error) {
 	unboosted := o.str("unboosted", "") == "true"
+	includeAll := o.str("all", "") == "true"
 	section := strings.ToUpper(o.str("section", ""))
 	search := strings.ToLower(o.str("search", ""))
 
@@ -89,9 +90,20 @@ func cmdOffers(_ []string, o opts) (obj, error) {
 	if err != nil {
 		return nil, err
 	}
-	all := offerList(bodies)
-	if len(all) == 0 {
+	everything := offerList(bodies)
+	if len(everything) == 0 {
 		return obj{"success": false, "note": "No offers came back. You may be signed out (run `woolies status`)."}, nil
+	}
+	// By default keep only offers for Woolworths shopping. The rest are partner promos
+	// (home loans, banking, BIG W, health brands, gift cards).
+	all := everything
+	if !includeAll {
+		all = all[:0:0]
+		for _, of := range everything {
+			if isWoolworthsOffer(of) {
+				all = append(all, of)
+			}
+		}
 	}
 
 	boosted := 0
@@ -111,7 +123,20 @@ func cmdOffers(_ []string, o opts) (obj, error) {
 		}
 		offers = append(offers, of)
 	}
-	return obj{"success": true, "total": len(all), "boosted": boosted, "count": len(offers), "offers": offers}, nil
+	return obj{"success": true, "total": len(all), "boosted": boosted, "count": len(offers), "hidden": len(everything) - len(all), "offers": offers}, nil
+}
+
+// woolworthsBanners are the banner ids on offers for Woolworths supermarkets (and Metro).
+// Partner offers carry other banners (BIG W, banking, gift cards and so on).
+var woolworthsBanners = map[string]bool{"1005": true, "1030": true}
+
+func isWoolworthsOffer(of obj) bool {
+	for _, b := range asArr(of["bannerIds"]) {
+		if woolworthsBanners[str(b)] {
+			return true
+		}
+	}
+	return false
 }
 
 // offerList trims the captured offers responses to one entry per offer, in the page's order.
@@ -143,6 +168,7 @@ func trimOffer(m obj) obj {
 		"section":     display["section"],
 		"heading":     display["heading"],
 		"description": dig(display, "description", "summary"),
+		"bannerIds":   dig(attrs, "summary", "bannerIds"),
 		"startsAt":    red["startDateTime"],
 		"endsAt":      red["endDateTime"],
 	}

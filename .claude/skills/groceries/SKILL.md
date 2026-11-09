@@ -44,7 +44,7 @@ woolies timeslots [--method Courier|Pickup] [--address <addressId>] [--all]   # 
 woolies orders [--order-id N] [--limit 5]   # read-only past orders
 woolies logout                      # signs the user out (clears the profile); only when they ask
 woolies orders --latest             # newest order with its items in one call (picked by date, not filtered by status)
-woolies offers [--unboosted] [--section WEEKLY_BOOSTERS] [--search text]   # read-only Everyday Rewards points offers; boosting is not supported, tell the user to boost in the app
+woolies offers [--unboosted] [--section WEEKLY_BOOSTERS] [--search text] [--all]   # read-only Everyday Rewards points offers; boosting is not supported, tell the user to boost in the app. Shows only Woolworths shopping offers unless --all
 woolies cupboard list|add|remove|use|set-qty|clear   # local cupboard file, no browser, whole-number qty; see Flow step 1
 woolies cupboard add-latest [--dry-run]   # append the newest order's items to the cupboard file (dedupes by stockcode + order); the only cupboard command that calls Woolies
 ```
