@@ -36,7 +36,7 @@ func TestOffersList(t *testing.T) {
 		{"x/wx-rtl-offer-v2/offers", decode(t, offersFixture)}, // the page can fetch twice: no duplicates
 	}, nil)
 	res := mustOK(t)(cmdOffers(nil, opts{}))
-	if res["total"] != 2 || res["boosted"] != 1 || res["count"] != 2 {
+	if res["total"] != 2 || res["boosted"] != 1 || res["hidden"] != 1 {
 		t.Fatalf("counts: %v", res)
 	}
 	first := res["offers"].([]obj)[0]
@@ -58,7 +58,7 @@ func TestOffersHidesPartnerPromosByDefault(t *testing.T) {
 	useFakeSession(t)
 	useFakeOffers(t, []capturedBody{{"x", decode(t, offersFixture)}}, nil)
 	res := mustOK(t)(cmdOffers(nil, opts{}))
-	if res["total"] != 2 || res["count"] != 2 || res["hidden"] != 1 {
+	if res["total"] != 2 || res["hidden"] != 1 {
 		t.Fatalf("default: %v", res)
 	}
 	for _, of := range res["offers"].([]obj) {
@@ -67,25 +67,8 @@ func TestOffersHidesPartnerPromosByDefault(t *testing.T) {
 		}
 	}
 	res = mustOK(t)(cmdOffers(nil, opts{"all": "true"}))
-	if res["total"] != 3 || res["count"] != 3 || res["hidden"] != 0 {
+	if res["total"] != 3 || res["hidden"] != 0 {
 		t.Fatalf("--all: %v", res)
-	}
-}
-
-func TestOffersFilters(t *testing.T) {
-	useFakeSession(t)
-	useFakeOffers(t, []capturedBody{{"x", decode(t, offersFixture)}}, nil)
-	res := mustOK(t)(cmdOffers(nil, opts{"unboosted": "true"}))
-	if res["count"] != 1 || res["boosted"] != 1 || res["total"] != 2 {
-		t.Fatalf("unboosted: %v", res)
-	}
-	res = mustOK(t)(cmdOffers(nil, opts{"section": "default"}))
-	if res["count"] != 1 || res["offers"].([]obj)[0]["id"] != "b2" {
-		t.Fatalf("section: %v", res)
-	}
-	res = mustOK(t)(cmdOffers(nil, opts{"search": "ZUCCHINI"}))
-	if res["count"] != 1 || res["offers"].([]obj)[0]["id"] != "a1" {
-		t.Fatalf("search: %v", res)
 	}
 }
 

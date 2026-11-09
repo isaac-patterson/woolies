@@ -40,7 +40,7 @@ func help() string {
   woolies orders [--order-id N] [--limit 5]   read-only
   woolies orders --latest             newest order with its items in one call (header + items); picked by date, never filtered by status.
                                       The status field is whatever the site reports and can lag the Woolies app
-  woolies offers [--unboosted] [--section WEEKLY_BOOSTERS] [--search <text>] [--all]
+  woolies offers [--all]
                                       active Everyday Rewards points offers, with boosted true/false, dates, minimum spend and reward.
                                       Read-only: it reads the offers the home page loads and never boosts anything.
                                       By default only Woolworths shopping offers are shown; --all adds partner promos (banking, BIG W, gift cards)
@@ -80,7 +80,7 @@ Calls launch a headless browser and are serialized; batch terms/items rather tha
 `
 }
 
-var booleanFlags = map[string]bool{"special": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true, "unboosted": true}
+var booleanFlags = map[string]bool{"special": true, "help": true, "dry-run": true, "all": true, "food": true, "refresh": true, "latest": true, "yes": true}
 
 func parseArgs(args []string) ([]string, opts, error) {
 	var pos []string

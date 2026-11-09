@@ -77,10 +77,7 @@ func browserCaptureOfferBodies(s *session, target string) ([]capturedBody, error
 // cmdOffers lists the signed-in account's active Everyday Rewards offers. Read-only: it never
 // boosts anything.
 func cmdOffers(_ []string, o opts) (obj, error) {
-	unboosted := o.str("unboosted", "") == "true"
 	includeAll := o.str("all", "") == "true"
-	section := strings.ToUpper(o.str("section", ""))
-	search := strings.ToLower(o.str("search", ""))
 
 	s, err := getSession()
 	if err != nil {
@@ -107,23 +104,12 @@ func cmdOffers(_ []string, o opts) (obj, error) {
 	}
 
 	boosted := 0
-	offers := []obj{}
 	for _, of := range all {
 		if of["boosted"] == true {
 			boosted++
 		}
-		if unboosted && of["boosted"] == true {
-			continue
-		}
-		if section != "" && !strings.EqualFold(str(of["section"]), section) {
-			continue
-		}
-		if search != "" && !strings.Contains(strings.ToLower(str(of["heading"])+" "+str(of["description"])), search) {
-			continue
-		}
-		offers = append(offers, of)
 	}
-	return obj{"success": true, "total": len(all), "boosted": boosted, "count": len(offers), "hidden": len(everything) - len(all), "offers": offers}, nil
+	return obj{"success": true, "total": len(all), "boosted": boosted, "hidden": len(everything) - len(all), "offers": all}, nil
 }
 
 // woolworthsBanners are the banner ids on offers for Woolworths supermarkets (and Metro).
