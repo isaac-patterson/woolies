@@ -151,6 +151,7 @@ func trimOffer(m obj) obj {
 	out := obj{
 		"id":          m["id"],
 		"boosted":     attrs["boostState"] == "BOOSTED",
+		"boostable":   dig(display, "callToAction", "label") == "Boost",
 		"section":     display["section"],
 		"heading":     display["heading"],
 		"description": dig(display, "description", "summary"),
@@ -164,7 +165,12 @@ func trimOffer(m obj) obj {
 	// The reward, minimum spend and channels sit on the first coupon.
 	var couponRed obj
 	if coupons := asArr(attrs["coupons"]); len(coupons) > 0 {
-		cattrs := asObj(dig(asObj(coupons[0]), "attributes"))
+		idx := 0
+		if n, ok := attrs["currentCouponIndex"].(float64); ok && int(n) >= 0 && int(n) < len(coupons) {
+			idx = int(n)
+		}
+		out["couponId"] = asObj(coupons[idx])["id"]
+		cattrs := asObj(dig(asObj(coupons[idx]), "attributes"))
 		couponRed = asObj(cattrs["redemption"])
 		if reward := asObj(cattrs["reward"]); reward != nil {
 			out["reward"] = obj{"type": reward["type"], "value": reward["value"]}

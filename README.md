@@ -89,6 +89,8 @@ woolies quick-add <term...> [qty=1] [--dry-run]   search, set the top available 
 woolies orders [--order-id N] [--limit 5]   read-only
 woolies orders --latest                      newest order with its items in one call (read-only)
 woolies offers [--all]                        active Everyday Rewards points offers (read-only; never boosts). Only Woolworths shopping offers by default; --all adds partner promos
+woolies activate <offer id>... [--yes]   boost (activate) offers so purchases earn the points; without --yes it only shows what it would boost
+woolies activate --all [--yes]               every unboosted Woolworths shopping offer
 woolies cupboard add-latest [--file P] [--dry-run]   append newest order's items to a cupboard CSV, with pack size and per-100g nutrition (kj, protein, fat, sat fat, carbs, sugars, fibre, sodium) from each product page (skips rows already present for that order; default: `cupboard_file`)
 woolies cupboard list|add|remove|use|set-qty|clear ...   manage the cupboard CSV by hand (file-only, no browser or lock; writes are atomic, keep a .bak, and take --dry-run; `clear` needs --yes). See `woolies help`
 woolies recipe list [--dir D]               slug, title, serves, cost_per_serving (default: `recipes_dir`)
@@ -145,12 +147,14 @@ Before committing a change, run `make audit`; it must pass.
 
 ## Everyday Rewards offers
 
-`woolies offers` lists the account's active Everyday Rewards points offers (the Boost offers), read-only. It never boosts anything, so boost in the Woolies app or on the site.
+`woolies offers` lists the account's active Everyday Rewards points offers (the Boost offers), read-only. `woolies activate` boosts them.
 
 - **How it reads them:** the offers come from `prod.api-wr.com/wx-rtl-offer-v2/offers`, a different host from the shop that takes the page's own auth headers. So the command loads the home page and reads the offers response the page already fetches, as `orders` does, instead of calling the API itself.
 - **Each offer has:** `id`, `boosted`, `section` (such as `WEEKLY_BOOSTERS`), `heading`, `description`, `startsAt`, `endsAt`, `reward` (`type` and `value`), `minimumSpend` in dollars, `channels`, `bannerIds`, and `primaryProductId` when the offer is for one product. The long terms text is left out.
 - **Partner promos:** by default only Woolworths shopping offers are shown. Offers with other banner ids (home loans, banking, BIG W, health brands, gift cards) are hidden and counted in `hidden`; `--all` includes them. The Woolworths banner ids (`1005`, `1030`) were worked out from which offers carry them, so check `woolworthsBanners` in `offers.go` if offers go missing.
 - **Result fields:** `total` and `boosted` count the shown offers, and `hidden` counts the partner promos left out.
+- **Activating:** `woolies activate <id>...` takes an offer `id` (or its `couponId`) from `offers`. Boosting changes the account and can't be undone, so nothing is sent unless `--yes` is passed; without it the command lists what it would boost. `--all` means every unboosted Woolworths offer. Already-boosted and button-less offers (such as "Discover" links) are skipped and listed, and a failed boost is reported per offer with the API's reason.
+- **How it boosts:** it sends `POST prod.api-wr.com/wx/v1/csl/customers/offers/boost` from inside the page with body `{"offerIds":[<couponId>...]}`, as the site does. The `hashcrn` header is the response of `/api/v3/ui/shopper/rewards/crn/hash` and `client_id` is read from the request the Rewards page (`/shop/myaccount/woolworthsrewards`) makes to the rewards service. It isn't the same value as the offers list uses, and nothing is stored in the repo.
 
 ## Configuration
 
@@ -175,7 +179,8 @@ Settings live in a JSON file, `~/.woolies/config.json` (or the path in `WOOLIES_
 - `cmd/woolies/recipe.go`: the file-only `recipe` commands (markdown parser, fuzzy lookup, `set`, `match`). Tests use copies of real recipes in `cmd/woolies/testdata/recipes/`.
 - `cmd/woolies/specials_cache.go`: the `specials --all` cache.
 - `cmd/woolies/offers.go`: the `offers` command: captures the page's offers response and trims it.
-- Tests (`*_test.go`) run offline. `fakesite_test.go` stands in for the Woolies API (it swaps `request`, `captureOrderBodies` and `captureOfferBodies`), so commands are tested without a browser or an account; `make test/cover` shows coverage (about 86%; the rest is the code that drives the browser itself).
+- `cmd/woolies/activate.go`: the `activate` command: resolves ids against the offers list and sends the boost call.
+- Tests (`*_test.go`) run offline. `fakesite_test.go` stands in for the Woolies API (it swaps `request`, `captureOrderBodies`, `captureOfferBodies` and `postBoost`), so commands are tested without a browser or an account; `make test/cover` shows coverage (about 86%; the rest is the code that drives the browser itself).
 - `cmd/woolies/browser.go`: lock, browser launch, and the in-page `fetch` helper.
 - `cmd/woolies/trim.go`: trims the site's JSON down to the fields that matter.
 

@@ -19,7 +19,8 @@ func help() string {
   woolies status                      logged in? store id, reserved slot, minimum spend, cart summary
   woolies login                       visible browser for manual sign-in (close the window when done; it then verifies the login)
   woolies logout                      sign out (clears the profile's cookies and site data)
-  woolies search <term...> [--page-size 8] [--sort TraderRelevance|PriceAsc|PriceDesc|Name] [--special] [--page 1]
+  woolies search <term...> [--page-size 8] [--sort TraderRelevance|PriceAsc|PriceDesc|Name] [--special] [--page 1] [--nutrition]
+                                      --nutrition adds per-100g nutrition to each product (one extra request per product; keep --page-size small)
   woolies product <stockcode>
   woolies specials (--term <t> | --category <nodeId>) [--page-size 8] [--page 1]
   woolies specials --all [--food] [--department <a,b>] [--min-discount <percent>] [--limit 200] [--max-pages 60] [--refresh] [--max-age 24]
@@ -44,6 +45,10 @@ func help() string {
                                       active Everyday Rewards points offers, with boosted true/false, dates, minimum spend and reward.
                                       Read-only: it reads the offers the home page loads and never boosts anything.
                                       By default only Woolworths shopping offers are shown; --all adds partner promos (banking, BIG W, gift cards)
+  woolies activate <offer id>... [--yes]
+  woolies activate --all [--yes]      boost (activate) offers so purchases earn the points. Ids come from "woolies offers" (an offer id or its
+                                      couponId). Boosting changes the account and can't be undone, so without --yes it only shows what it
+                                      would boost. --all means every unboosted Woolworths shopping offer. Offers already boosted are skipped
   woolies cupboard list [--file P] [--search text]      all rows (item substring filter), with total
   woolies cupboard add <item...> [--qty N] [--source had|elsewhere|..] [--stockcode N] [--size 500g]
                                       add by hand (default source had, confirmed today); if the stockcode (else item name) is already
@@ -128,6 +133,7 @@ var commands = map[string]func([]string, opts) (obj, error){
 	"quick-add":  cmdQuickAdd,
 	"orders":     cmdOrders,
 	"offers":     cmdOffers,
+	"activate":   cmdActivate,
 	"cupboard":   cmdCupboard,
 	"recipe":     cmdRecipe,
 	"logout":     cmdLogout,
